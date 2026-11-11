@@ -4,6 +4,7 @@
 #
 
 $(call soong_config_set,camera,package_name,com.nothing.camera)
+$(call soong_config_set_bool,nothing_camera,asteroids,true)
 
 PRODUCT_PACKAGES += \
     NTCamera \
