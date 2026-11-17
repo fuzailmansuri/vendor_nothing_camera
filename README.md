@@ -4,6 +4,9 @@ Nothing Camera (`com.nothing.camera`) for the Nothing Phone (3a) / (3a) Pro
 (asteroids), as a drop-in extract-utils vendor repository.
 Clone to `vendor/nothing/camera` and run `git lfs pull`.
 
+The current drop uses Nothing OS `Asteroids_C5.0-261106-1007`, including
+NTCamera **17.0.00.78.04** (version code `170007804`). The APK targets SDK 36.
+
 ## Integration
 
 ```make
@@ -29,17 +32,22 @@ This repo is not enough on its own. The build also needs:
   exposing the feature ids the app reads by reflection
   (`NTF_QCOM = 59`, `NTF_MTK = 60`, `NTF_PONG = 62`, `NTF_PACMAN = 63`,
   `NTF_TETRIS = 64`, `NTF_ASTEROIDS = 80`, `NTF_ASTEROIDS_PLUS = 86`,
-  `NTF_JPN = 89`, `NTF_DRAGONITE = 110`, `NTF_BACKGROUND_RES_LIMIT = 115`),
+  `NTF_IND = 88`, `NTF_JPN = 89`, `NTF_DRAGONITE = 110`,
+  `NTF_BACKGROUND_RES_LIMIT = 115`, `NTF_LINEAR_VIBRATOR = 139`),
   and falling back to `ro.vendor.nothing.feature.diff.{device,plus}.Asteroids`
   when no prop exists for `Build.DEVICE`.
 - The Nothing feature props, readable by `platform_app` and
   `platform_app_36` (`get_prop(..., vendor_nothing_feature_prop)`):
 
   ```
-  ro.vendor.nothing.feature.base=0xe24800001004458438124a040106b4247b97ffL
-  ro.vendor.nothing.feature.diff.device.Asteroids=0x241001a38fc01acc038d140ad44002d0842080L
+  ro.vendor.nothing.feature.base=0x1004458438124a040126b4247b97ffL
+  ro.vendor.nothing.feature.diff.device.Asteroids=0xa80c901acc038d140ad44002d8842080L
   ro.vendor.nothing.feature.diff.plus.Asteroids=0x4000000000000000000000L
   ```
+
+  These are the port's ODM-owned masks. Keep their device/SKU selection when
+  updating; importing every stock feature bit can select Nothing OS features
+  that the ROM does not implement.
 - Nothing's common sepolicy, for the `vendor_ntf_file` type and
   `com.nothing.camera.postproc.IPostProcService/default` labelled
   `vendor_hal_camera_service`.
@@ -62,6 +70,7 @@ blobs that belong to the device.
 | `libofflineproc_jni` | NTCamera's JNI for `media.offline` |
 | `offlineproc/` | `libofflineproc_shim`: `IOfflineProcService`/`IOfflineProcClient` (AIDL reconstructed from Nothing's `libcamera_client`, same transaction codes and vtables) plus `OfflineParameters` and `OfflineProcClient` with Nothing's object layout. `ntcam_offlineproc`: lazy `media.offline` service. |
 | `libntcam_client` | system_ext client library `libofflineproc_jni` links against |
+| `app/libarcsoft_dehaze.so` | compatible engine retained from the previous APK and bundled by the Asteroids genrule |
 | `shims/libntcam_session_shim` | prebuilt, see below |
 | `vendor.noth.hardware.camera-service` | Nothing's algorithm HAL (`INtCamService`), run in `hal_camera_default` (QTI camera provider domain) |
 | `sepolicy/` | Mirrors the stock policy for the above, plus the `platform_app`/`platform_app_36` client rules |
@@ -81,10 +90,35 @@ the camera holds it.
 ./extract-files.py <path to Nothing OS dump>   # regenerates makefiles too
 ```
 
-`NTCamera.apk`, `libofflineproc_jni`, `libntcam_client` and
-`libQnnHtpV73Stub` are not in stock firmware and are pinned by SHA1 in
-`proprietary-files.txt`, so extract-utils keeps the copies in this repo.
-Drop the pin and re-apply `patches/NTCamera.md` to move to a new APK.
+Use a dump of the matching release, with `system`, `system_ext` and `vendor`.
+The APK, JNI and QNN stub come from that stock dump. The stock
+`system/lib64/libcamera_client.so` is copied to
+`system_ext/lib64/libntcam_client.so` with its SONAME fixed; JNI's dependency
+is renamed to match. The algorithm-service V1 manifest is copied from stock's
+`vendor.noth.hardware.camera-service-v1.xml` to the existing module path.
+
+Extraction applies [NTCamera-C5.0.patch](patches/NTCamera-C5.0.patch).
+The APK entry records both its stock SHA1
+(`8ca1c7afb3154d57f0d879520e69f4091ac9a441`) and fixed SHA1
+(`5d3a69b33738e9aab66f8c5bb42e3dfec8952723`), so a stale patched APK is not
+mistaken for the current input. Refresh both hashes and review the patch when
+changing releases. [NTCamera.md](patches/NTCamera.md) also describes the separate
+Asteroids profile fixup performed by `app/patch_ntcamera.py`. That fixup also
+bundles the previous APK's dehaze engine: the new stock APK omits it even though
+the dehaze wrapper changes only its build ID. Its packaged `libmpbase.so`
+dependency is byte-identical to the previous APK. The engine is hash-checked
+before insertion so this update preserves the existing enhancement path.
+
+The new client library requires `libcameracompatbilityinfo` and
+`lib-camera-compatibility-info-api` from Android 17. Keep the device provider's
+existing postproc interface relink and session shim: updating only the APK or
+replacing the shim with a sibling-device binary does not establish compatibility.
+
+Before accepting another drop, compare native dependencies, framework lookups,
+feature selection, permissions and VINTF declarations. Static extraction and
+bytecode checks cannot establish working capture. On a built device with
+SELinux enforcing, verify cold start, every lens, portrait, HDR/night, video,
+saved output and capture while pausing/reopening the app.
 
 ## Device-tree side (not in this repo)
 
@@ -132,9 +166,6 @@ vendor/lib64/vendor.qti.hardware.camera.postproc@1.0.so:vendor/lib64/vendor.qti.
 `DISABLE_CHECKELF` is needed because the provider's new `DT_NEEDED` lives in
 this repo, outside the device's soong namespace.
 
-After flashing, run `adb shell pm clear com.nothing.camera` once to drop
-stale capture queue entries left by earlier builds.
-
 ## Credits
 
 - Omkar Chandorkar - repository layout, extract-utils
@@ -151,3 +182,7 @@ stale capture queue entries left by earlier builds.
 - Stock Nothing OS firmware (permissions, SELinux policy, binaries used for
   reverse engineering) from
   [leddaz-dump-stash/nothing_asteroids_dump@6c10386180](https://github.com/leddaz-dump-stash/nothing_asteroids_dump/tree/6c10386180c83031c983f569c3c956ebfe8a9c27)
+- Current C5.0 camera drop from
+  [spike0en/nothing_archive: Asteroids_C5.0-261106-1007](https://github.com/spike0en/nothing_archive/releases/tag/Asteroids_C5.0-261106-1007).
+  The extracted system, system_ext, vendor and odm images matched the release's
+  published SHA256 checksums.

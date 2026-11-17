@@ -12,16 +12,19 @@ import zlib
 
 
 # shortcut: pinned C5.0 bytecode, refresh this patch when the camera APK changes.
-DEX_SHA256 = "918b89f7e941cd9d467c130b2ff1db15a4953e0ef66ba6d6bd2dbb5d1713bfbb"
-PATCHED_DEX_SHA256 = "89bf972c5aab8effc905912a8e9603a30b7d4f18f52c8a44d04b31fa609d45a6"
-PATCH_OFFSET = 2182962
-ORIGINAL = bytes.fromhex("7120592925000c05")
+DEX_SHA256 = "4f4ef741ef88751b9eadc56cffbab1b0b772d8903d9b3d87931c5e9cd6e98310"
+PATCHED_DEX_SHA256 = "0c7429603a2f336e30e9ad766a6f9c5b8389a4913c2973772bd2395f520d131b"
+PATCH_OFFSET = 5734104
+ORIGINAL = bytes.fromhex("7120a86427000c07")
 # ProductConfig.<clinit>: use the existing "Asteroids" string instead of ro.product.device.
-REPLACEMENT = bytes.fromhex("1a058a1300000000")
+REPLACEMENT = bytes.fromhex("1a07971b00000000")
 # FeatureConfigParser.initPropertyValue: keep ConfigMapAsteroids[Plus] selection.
-FEATURE_OFFSET = 2145474
-FEATURE_ORIGINAL = bytes.fromhex("7120592932000c02")
-FEATURE_REPLACEMENT = bytes.fromhex("1a028a1300000000")
+FEATURE_OFFSET = 5690478
+FEATURE_ORIGINAL = bytes.fromhex("7120a86432000c02")
+FEATURE_REPLACEMENT = bytes.fromhex("1a02971b00000000")
+# C5.0 omits the engine; its dehaze wrapper differs from our previous APK only by build ID.
+DEHAZE_SHA256 = "f26695afd804a162932796b709f153e870d9e9fafc454b3f456bf960ff80e086"
+DEHAZE_MEMBER = "lib/arm64-v8a/libarcsoft_dehaze.so"
 
 
 def patch_dex(data):
@@ -59,12 +62,18 @@ def resolve_source(source):
     return src
 
 
-def patch_apk(source, output):
+def patch_apk(source, output, dehaze_library):
     source = resolve_source(source)
-    if Path(source).resolve() == Path(output).resolve():
-        raise ValueError("The extracted camera APK must remain unchanged")
+    if Path(output).resolve() in (Path(source).resolve(), Path(dehaze_library).resolve()):
+        raise ValueError("Camera inputs must remain unchanged")
+    engine = Path(dehaze_library).read_bytes()
+    if hashlib.sha256(engine).hexdigest() != DEHAZE_SHA256:
+        raise ValueError("Unexpected dehaze engine; review its camera compatibility")
     with zipfile.ZipFile(source) as original:
         dex = patch_dex(original.read("classes5.dex"))
+        has_engine = DEHAZE_MEMBER in original.namelist()
+        if has_engine and original.read(DEHAZE_MEMBER) != engine:
+            raise ValueError("NTCamera already contains a different dehaze engine")
         with zipfile.ZipFile(output, "w") as patched:
             patched.comment = original.comment
             for member in original.infolist():
@@ -76,14 +85,22 @@ def patch_apk(source, output):
                 ):
                     continue
                 patched.writestr(member, dex if name == "classes5.dex" else original.read(name))
+            if not has_engine:
+                # Match the stock wrapper's ZIP packaging; android_app_import aligns/signs it.
+                member = original.getinfo("lib/arm64-v8a/libdehaze.so")
+                added = zipfile.ZipInfo(DEHAZE_MEMBER, member.date_time)
+                added.compress_type = member.compress_type
+                added.external_attr = member.external_attr
+                patched.writestr(added, engine)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Keep NTCamera on the Asteroids product profile")
     parser.add_argument("source")
     parser.add_argument("output")
+    parser.add_argument("dehaze_library")
     args = parser.parse_args()
-    patch_apk(args.source, args.output)
+    patch_apk(args.source, args.output, args.dehaze_library)
 
 
 if __name__ == "__main__":

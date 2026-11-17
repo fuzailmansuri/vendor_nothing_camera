@@ -1,185 +1,116 @@
-# NTCamera bytecode changes
+# NTCamera C5.0 compatibility changes
 
-The shipped `NTCamera.apk` (16.0.01.25.00) differs from Nothing's build in
-`classes4.dex` and `classes5.dex`. Each change in `classes4.dex` wraps a call that reaches Nothing OS framework code
-in a `catch java.lang.Error`, so a `NoClassDefFoundError`/`LinkageError` on a
-non-Nothing framework degrades the feature instead of crashing the camera:
+Source: [Asteroids_C5.0-261106-1007](https://github.com/spike0en/nothing_archive/releases/tag/Asteroids_C5.0-261106-1007),
+NTCamera **17.0.00.78.04**, version code `170007804`, eight DEX files.
 
-| Class | What is guarded | Missing on AOSP |
-|---|---|---|
-| `CameraContext$OpenCameraStateCallback.onOpened` | `new ProxyCameraDevice(device)` | `android.hardware.camera2.ProxyCameraDevice` (Nothing framework) |
-| `CameraActivity.onCreate` | analytics init (`NTCameraDataTracking`, `com.nothing.experience.AppTracking`) | NothingExperience |
-| `CameraActivity.onCreate` | `new com.nothing.kafka.EventObserver(...)` | `nt-framework.jar` |
-| `AbstractBaseMode` / `AbstractModeImpl` / `AbstractModeImpl$1` | pending-capture cleanup `ContentResolver.query` and its error log | Nothing MediaProvider columns |
-| `SpecialTypeProvider$LRUCache.removeEldestEntry` | `Long.parseLong` on cache file names | - |
-| `SettingCharacteristics.init` / `SettingContext.getCameraId` | First-run fallback when `pref_camera_id_key` is -1/null to prevent NPE in `CameraCharacteristics.get` | - |
-| `NcfBokehMode.getCalibrationData` | Null check on `QC_DUAL_MODULE_INFO` and catch `Exception` before `.length` to prevent NPE in Portrait mode | Dual-camera calibration metadata |
-| `UFSManager.saveImage` / `updateRequestPriority` | Null check `mSaveReQuestHandle` before `removeMessages` / `post` to prevent shutter capture NPE when HAL session drops | - |
+## Extraction patch
 
-When updating the APK, re-apply every hunk below to the new `classes4.dex`
-(class/method names are stable across releases; register numbers may move).
-Hunks are shown exactly as they exist in the shipped dex.
+`extract-files.py` applies [NTCamera-C5.0.patch](NTCamera-C5.0.patch) to the
+stock APK. Five classes contain the six changed methods:
 
-### com.nothing.cameracore.context.module.CameraContext$OpenCameraStateCallback
-.method public onOpened(Landroid/hardware/camera2/CameraDevice;)V
-```smali
-    :try_start_0
-    new-instance v0, Landroid/hardware/camera2/ProxyCameraDevice;
+| Class / method | Change |
+| --- | --- |
+| `UFSManager.saveImage(long, NtCamUfsImage, boolean)` | Cache the save handler, return `false` if it is absent, and return the actual result of `Handler.post()`. A failed enqueue must not claim the image was saved. |
+| `UFSManager.updateRequestPriority(long)` | Use one handler reference for removal/scheduling and return when it is absent. |
+| `NcfBokehMode.getCalibrationData()` | Skip null or empty `QC_DUAL_MODULE_INFO` before logging its length/first byte. Preserve the existing calibration-data lookup. |
+| `SettingCharacteristics.init(int)` | Replace a negative initial camera ID with rear camera ID `0` before querying characteristics. |
+| `SettingContext.getCameraId()` | Return `0` for a negative stored ID. |
+| `AbstractBaseMode.lambda$deleteProcessPacket$1(...)` | Handle `IllegalArgumentException` in the existing pending-capture query/error regions, alongside stock's security/database handling. |
 
-    invoke-direct {v0, p1}, Landroid/hardware/camera2/ProxyCameraDevice;-><init>(Landroid/hardware/camera2/CameraDevice;)V
-    :try_end_0
-    .catch Ljava/lang/Error; {:try_start_0 .. :try_end_0} :catch_0
+`UFSClient.saveRawImg()` propagates the save result. The inspected QCOM/common
+capture callers set `isUfsSave` from it and transfer image ownership to UFS only
+on success. The common and simulation callers continue into
+`NcfAlgoPostTask.addImage()` on failure. Returning `false` therefore retains the
+existing in-process route rather than acknowledging a dropped background save.
+This is a static caller trace, not a device capture result.
+
+The new stock APK already catches `Error` around ProxyCameraDevice construction,
+analytics/Kafka setup and cache parsing. Its `AbstractModeImpl` pending cleanup
+already catches `Exception`/`Error`, and `AbstractModeImpl$1` handles invalid
+queries. Review the new methods when updating; do not blindly transplant every
+old APK hunk or its register numbers.
+
+The stock APK SHA1 is `8ca1c7afb3154d57f0d879520e69f4091ac9a441`; after the
+extraction patch it is `5d3a69b33738e9aab66f8c5bb42e3dfec8952723`. Both appear in
+`proprietary-files.txt`. The fixed hash belongs to the APK encoded by the
+repository's bundled apktool; refreshing a patch/tool requires verifying and
+updating the result hash too.
+
+## Asteroids profile selection
+
+The optional Asteroids genrule runs `app/patch_ntcamera.py` after extraction.
+It changes two property-reader instructions in `classes5.dex`:
+
+- `ProductConfig.<clinit>` uses the existing `"Asteroids"` string for device
+  selection instead of the ROM's `ro.product.device` identity.
+- `FeatureConfigParser.initPropertyValue` uses the same string to select the
+  shipped `ConfigMapAsteroids` or `ConfigMapAsteroidsPlus` classes.
+
+The SKU still comes from `NTF_ASTEROIDS_PLUS` and the device's feature masks.
+The fixup neither replaces `ro.product.device` globally nor changes those masks.
+It checks the exact input DEX hash and both original instructions, updates the
+DEX checksum/signature, and rejects an unknown APK revision. Other APK members
+are copied unchanged except obsolete signing metadata and the retained dehaze
+engine described below; normal platform signing remains owned by
+`android_app_import`.
+
+Input `classes5.dex` SHA256:
+`4f4ef741ef88751b9eadc56cffbab1b0b772d8903d9b3d87931c5e9cd6e98310`.
+Profile-fixed SHA256:
+`0c7429603a2f336e30e9ad766a6f9c5b8389a4913c2973772bd2395f520d131b`.
+Offsets and instruction bytes live in `app/patch_ntcamera.py` and must be
+relocated from the actual methods for the next APK release.
+
+Run the host checks without starting a ROM build:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s app -p 'test_patch_ntcamera.py' -v
 ```
 
-### com.nothing.camera.activity.CameraActivity
-.method public onCreate(Landroid/os/Bundle;)V
-```smali
-    :try_start_0
-    invoke-static {}, Lcom/nothing/common/analytics/NTCameraDataTracking;->getInstance()Lcom/nothing/common/analytics/NTCameraDataTracking;
+The five tests cover limited byte changes and valid DEX checksums, idempotence,
+rejection of changed/truncated bytecode, preservation of the other seven DEX
+files/native libraries/resources/manifest, exact dehaze-engine insertion without
+duplicates, rejection of an unknown engine before writing, and refusal to
+overwrite either input.
+Production extraction also verified both APK hashes and assembled the changed
+bytecode. These checks do not run ART verification or any camera mode.
 
-    move-result-object p1
+## Native and framework compatibility
 
-    iget-object v2, p0, Lcom/nothing/camera/activity/CameraActivity;->mAppContext:Landroid/content/Context;
+The C5.0 JNI is relinked to the renamed stock client `libntcam_client.so`.
+The algorithm HAL remains `vendor.noth.hardware.camera` V1. Keep the device's
+Nothing postproc interface relink, `libui_shim`, and provider session shim.
+The new client uses Android 17 camera compatibility libraries; the extraction
+output declares them as dependencies.
 
-    invoke-static {v2}, Lcom/nothing/experience/AppTracking;->getInstance(Landroid/content/Context;)Lcom/nothing/experience/AppTracking;
+The stock APK contains JNI variants for several devices. Some Anc, document,
+dual-bokeh and dehaze dependencies are absent from this Asteroids dump. The
+Asteroids config selects single-bokeh version `3` and dual-bokeh version `1`;
+these do not select the new Anc variants. Scene/document/dehaze loaders have
+stock `UnsatisfiedLinkError` handling; dehaze returns `-1` without calling its
+native method if loading failed. A handled load error still loses an enhancement.
 
-    move-result-object v2
+To preserve dehaze, the Asteroids genrule bundles `app/libarcsoft_dehaze.so`
+from the previous port's APK (16.0.01.27.00), SHA256
+`f26695afd804a162932796b709f153e870d9e9fafc454b3f456bf960ff80e086`.
+The old/new `libdehaze.so` wrappers differ in exactly 20 build-ID bytes; all
+other ELF sections, including executable code and dynamic symbols, match.
+Their `libmpbase.so` dependency also matches byte for byte. The new APK retains
+the wrapper's JNI method signature. This supplies the existing compatible
+engine without substituting an unrelated device's algorithm. Its hash and any
+existing APK copy are checked before writing, and repeated fixups do not add a
+duplicate ZIP member. Device processing/image quality remain unverified.
 
-    invoke-virtual {p1, v2}, Lcom/nothing/common/analytics/NTCameraDataTracking;->setAppTracking(Lcom/nothing/experience/AppTracking;)V
-    :try_end_0
-    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
-    .catch Ljava/lang/Error; {:try_start_0 .. :try_end_0} :catch_0
-```
+Do not fill remaining optional variant gaps with unrelated device blobs or
+enable additional feature bits as a workaround.
 
-### com.nothing.camera.activity.CameraActivity
-.method public onCreate(Landroid/os/Bundle;)V
-```smali
-    :try_start_1
-    new-instance p1, Lcom/nothing/kafka/EventObserver;
+The framework shim must also expose stock's reflected `NTF_IND = 88` and
+`NTF_LINEAR_VIBRATOR = 139`. Their values were read from C5.0's
+`com.nothing.NtFeatures`, inherited by `NtFeaturesUtils`. Keep the current masks:
+adding a constant is not evidence that the associated Nothing OS behavior is
+implemented.
 
-    new-instance v2, Landroid/os/Handler;
-
-    invoke-direct {v2}, Landroid/os/Handler;-><init>()V
-
-    const-string v4, "foreground_app"
-
-    invoke-direct {p1, p0, v2, v4}, Lcom/nothing/kafka/EventObserver;-><init>(Landroid/content/Context;Landroid/os/Handler;Ljava/lang/String;)V
-
-    iput-object p1, p0, Lcom/nothing/camera/activity/CameraActivity;->mEventObserver:Lcom/nothing/kafka/EventObserver;
-    :try_end_1
-    .catch Ljava/lang/Exception; {:try_start_1 .. :try_end_1} :catch_1
-    .catch Ljava/lang/Error; {:try_start_1 .. :try_end_1} :catch_1
-```
-
-### com.nothing.camera.mode.AbstractBaseMode
-.method static synthetic lambda$deleteProcessPacket$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;Ljava/io/File;)V
-```smali
-    :try_start_1
-    invoke-virtual/range {v4 .. v9}, Landroid/content/ContentResolver;->query(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;
-
-    move-result-object p0
-    :try_end_1
-    .catch Ljava/lang/Exception; {:try_start_1 .. :try_end_1} :catch_1
-    .catch Ljava/lang/Error; {:try_start_1 .. :try_end_1} :catch_2
-```
-
-### com.nothing.camera.mode.AbstractBaseMode
-.method static synthetic lambda$deleteProcessPacket$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;Ljava/io/File;)V
-```smali
-    :try_start_e
-    invoke-static {v3, v2, p0}, Lcom/nothing/common/utils/LogUtil;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V
-    :try_end_e
-    .catch Ljava/lang/Exception; {:try_start_e .. :try_end_e} :catch_2
-    .catch Ljava/lang/Error; {:try_start_e .. :try_end_e} :catch_2
-```
-
-### com.nothing.camera.mode.AbstractModeImpl
-.method static synthetic lambda$deleteProcessPacket$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;Ljava/io/File;)V
-```smali
-    :try_start_1
-    invoke-virtual/range {v4 .. v9}, Landroid/content/ContentResolver;->query(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;
-
-    move-result-object p0
-    :try_end_1
-    .catch Ljava/lang/Exception; {:try_start_1 .. :try_end_1} :catch_1
-    .catch Ljava/lang/Error; {:try_start_1 .. :try_end_1} :catch_2
-```
-
-### com.nothing.camera.mode.AbstractModeImpl
-.method static synthetic lambda$deleteProcessPacket$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;Ljava/io/File;)V
-```smali
-    :try_start_e
-    invoke-static {v3, v2, p0}, Lcom/nothing/common/utils/LogUtil;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V
-    :try_end_e
-    .catch Ljava/lang/Exception; {:try_start_e .. :try_end_e} :catch_2
-    .catch Ljava/lang/Error; {:try_start_e .. :try_end_e} :catch_2
-```
-
-### com.nothing.camera.mode.AbstractModeImpl$1
-.method static synthetic lambda$run$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;[ZLjava/io/File;)V
-```smali
-    :try_start_1
-    invoke-virtual/range {v4 .. v9}, Landroid/content/ContentResolver;->query(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;
-
-    move-result-object p0
-    :try_end_1
-    .catch Ljava/lang/Exception; {:try_start_1 .. :try_end_1} :catch_1
-    .catch Ljava/lang/Error; {:try_start_1 .. :try_end_1} :catch_2
-```
-
-### com.nothing.camera.mode.AbstractModeImpl$1
-.method static synthetic lambda$run$1(Lcom/nothing/common/storage/StoragePacket;Landroid/content/ContentResolver;[ZLjava/io/File;)V
-```smali
-    :try_start_e
-    invoke-static {v3, v2, p0}, Lcom/nothing/common/utils/LogUtil;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V
-    :try_end_e
-    .catch Ljava/lang/Exception; {:try_start_e .. :try_end_e} :catch_2
-    .catch Ljava/lang/Error; {:try_start_e .. :try_end_e} :catch_2
-```
-
-### com.nothing.camera.provider.SpecialTypeProvider$LRUCache
-.method private synthetic lambda$removeEldestEntry$0(Ljava/util/Map$Entry;)V
-```smali
-    :try_start_1
-    invoke-static {p1}, Ljava/lang/Long;->parseLong(Ljava/lang/String;)J
-
-    move-result-wide v9
-    :try_end_1
-    .catch Ljava/lang/Exception; {:try_start_1 .. :try_end_1} :catch_0
-    .catch Ljava/lang/Error; {:try_start_1 .. :try_end_1} :catch_1
-```
-
-### com.nothing.camera.mode.NcfBokehMode
-.method private getCalibrationData()V
-```smali
-    invoke-virtual {v7, v2}, Landroid/hardware/camera2/CameraCharacteristics;->get(Landroid/hardware/camera2/CameraCharacteristics$Key;)Ljava/lang/Object;
-
-    move-result-object v2
-
-    check-cast v2, [B
-
-    if-nez v2, :cond_qc_ok
-
-    goto :catch_c2
-
-    :cond_qc_ok
-    ...
-    :try_end_c2
-    .catch Ljava/lang/Exception; {:try_start_9d .. :try_end_c2} :catch_c2
-```
-
-### com.nothing.algolib.cameraufs.UFSManager
-.method public saveImage(JLcom/nothing/algolib/cameraufs/NtCamUfsImage;)Z
-```smali
-    iget-object v0, p0, Lcom/nothing/algolib/cameraufs/UFSManager;->mSaveReQuestHandle:Landroid/os/Handler;
-
-    if-eqz v0, :cond_skip_save_remove
-
-    const/4 v3, 0x2
-
-    invoke-virtual {v0, v3}, Landroid/os/Handler;->removeMessages(I)V
-
-    :cond_skip_save_remove
-```
-
-
+Before shipping, validate the compiled policy and merged VINTF, then test camera
+cold start, permissions, every lens, portrait, HDR/night, video, saved output,
+and pause/reopen with capture pending on the actual device in enforcing mode.
+No build or hardware result is implied by this update.

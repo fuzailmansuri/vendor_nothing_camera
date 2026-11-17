@@ -14,9 +14,10 @@ PRODUCT_COPY_FILES += \
     vendor/nothing/camera/proprietary/vendor/etc/init/vendor.noth.hardware.camera-service.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/vendor.noth.hardware.camera-service.rc
 
 PRODUCT_PACKAGES += \
+    libQnnHtpV73Stub \
     vendor.noth.hardware.camera-V1-ndk \
     vendor.noth.hardware.camera-service-impl \
+    libntcam_client \
     libofflineproc_jni \
-    libQnnHtpV73Stub \
     vendor.noth.hardware.camera-service.xml \
     vendor.noth.hardware.camera-service

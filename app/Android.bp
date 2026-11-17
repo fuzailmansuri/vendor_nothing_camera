@@ -19,14 +19,14 @@ soong_config_module_type {
 
 ntcamera_device_genrule {
     name: "NTCameraDeviceApk",
-    srcs: ["NTCamera.apk"],
+    srcs: ["NTCamera.apk", "libarcsoft_dehaze.so"],
     tools: ["ntcamera-device-fixup"],
     out: ["NTCamera-patched.apk"],
     soong_config_variables: {
         asteroids: {
-            cmd: "$(location ntcamera-device-fixup) $(in) $(out)",
+            cmd: "$(location ntcamera-device-fixup) $(location NTCamera.apk) $(out) $(location libarcsoft_dehaze.so)",
             conditions_default: {
-                cmd: "cp $(in) $(out)",
+                cmd: "cp $(location NTCamera.apk) $(out)",
             },
         },
     },
@@ -45,6 +45,7 @@ android_app_import {
         "Camera2",
     ],
     optional_uses_libs: [
+        "com.nothing.dynamiccolor",
         "androidx.window.extensions",
         "androidx.window.sidecar",
     ],

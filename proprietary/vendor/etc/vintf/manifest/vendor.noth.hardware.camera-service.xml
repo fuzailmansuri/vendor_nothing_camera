@@ -2,10 +2,6 @@
     <hal format="aidl">
         <name>vendor.noth.hardware.camera</name>
         <version>1</version>
-        <interface>
-            <name>INtCamService</name>
-            <instance>default</instance>
-        </interface>
         <fqname>INtCamService/default</fqname>
     </hal>
 </manifest>
