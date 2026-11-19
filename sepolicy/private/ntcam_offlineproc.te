@@ -6,3 +6,8 @@ init_daemon_domain(ntcam_offlineproc)
 binder_use(ntcam_offlineproc)
 binder_service(ntcam_offlineproc)
 add_service(ntcam_offlineproc, ntcam_offlineproc_service)
+
+# Nothing Camera (platform_app_36) binds media.offline and the service calls
+# back into its IOfflineProcClient listener.
+binder_call(platform_app, ntcam_offlineproc)
+binder_call(platform_app_36, ntcam_offlineproc)
