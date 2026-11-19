@@ -42,9 +42,18 @@ allow platform_app vendor_hal_noth_camera:memfd_file { read write getattr map };
 allow platform_app_36 vendor_hal_noth_camera:memfd_file { read write getattr map };
 allow system_app vendor_hal_noth_camera:memfd_file { read write getattr map };
 
-# Calibration/settings files owned by the camera app data dir
+# Calibration/settings files owned by the camera app data dir. app_data_file
+# may not be traversed by a non-appdomain (domain.te neverallow), so the app
+# passes the file descriptor instead of a path.
 allow hal_camera_default app_data_file:file { read write getattr map };
+allow hal_camera_default vendor_camera_data_file:dir r_dir_perms;
+allow hal_camera_default vendor_camera_data_file:file r_file_perms;
 allow hal_camera_default vendor_camera_data_file:lnk_file { read getattr };
+
+# libntcamcommonutils/libntcammetadata read /data/vendor/camera and
+# persist.vendor.camera.ncf.*; libcdsprpc (QNN) reads vendor.fastrpc.*.
+get_prop(hal_camera_default, vendor_camera_prop);
+get_prop(hal_camera_default, vendor_adsprpc_prop);
 
 # Suspend control used by the algorithm service while a capture pipeline runs
 wakelock_use(vendor_hal_noth_camera_server)
