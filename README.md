@@ -75,6 +75,16 @@ ship, so stock answers `initOffline()` with `-EINVAL` and NTCamera processes in
 the camera HAL. `ntcam_offlineproc` answers the same way, and starts only while
 the camera holds it.
 
+## Play Integrity Fix
+
+Play Integrity Fix (and similar Zygisk prop spoofers) rewrites
+`ro.product.device`/`ro.product.name` in every app process. NTCamera uses those
+to pick its per-device configuration, so with spoofing enabled it falls back to
+`ConfigMapDefault` and the camera runs with the wrong zoom/focal/preset setup.
+The shipped APK reads the unspoofed `ro.product.odm.*` props instead (see
+`patches/NTCamera.md`), and `nothing-fwk` does the same for the feature mask, so
+no PIF configuration change is needed.
+
 ## Updating
 
 ```sh

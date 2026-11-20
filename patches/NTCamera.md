@@ -182,4 +182,30 @@ Hunks are shown exactly as they exist in the shipped dex.
     :cond_skip_save_remove
 ```
 
+### Prop spoofing (Play Integrity Fix)
+
+`ProductConfig` and `FeatureConfigParser` derive the device/product from
+`ro.product.device`, `ro.product.brand` and `ro.product.model`. Play Integrity
+Fix (and other Zygisk prop spoofers) rewrite those in every app process, so the
+app resolves `ProductName.DEFAULT` and loads `ConfigMapDefault` instead of
+`ConfigMapAsteroids` — the camera then runs with the wrong zoom/focal/preset
+configuration. The per-partition props are not spoofed, so read those instead.
+This is a string-constant change only; no code is added or removed.
+
+### com.nothing.common.utils.ProductConfig
+.method static constructor <clinit>()V
+```smali
+    const-string v5, "ro.product.odm.device"
+```
+
+### com.nothing.common.utils.FeatureConfigParser
+.method private initPropertyValue()V
+```smali
+    const-string v2, "ro.product.odm.brand"
+
+    const-string v2, "ro.product.odm.model"
+
+    const-string v2, "ro.product.odm.device"
+```
+
 
