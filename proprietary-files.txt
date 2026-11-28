@@ -1,0 +1,19 @@
+# Camera app and permissions
+system_ext/priv-app/NTCamera/NTCamera.apk
+system_ext/lib64/libofflineproc_jni.so
+system_ext/etc/permissions/privapp-permissions-NTCamera.xml
+system/system/etc/sysconfig/nothing-hiddenapi-package-allowlist.xml:system/etc/sysconfig/nothing-hiddenapi-package-allowlist.xml
+
+# Nothing Camera algorithm service and decision library
+vendor/bin/hw/vendor.noth.hardware.camera-service
+vendor/etc/init/vendor.noth.hardware.camera-service.rc
+vendor/etc/vintf/manifest/vendor.noth.hardware.camera-service-v1.xml
+vendor/lib64/libQnnHtpV73Stub.so
+vendor/lib64/libcameradecision.so
+vendor/lib64/vendor.noth.hardware.camera-V1-ndk.so
+vendor/lib64/vendor.noth.hardware.camera-service-impl.so
+
+# Watermark fonts (libntcamskia / WaterMarkNode)
+vendor/etc/camera/NdotFont/Ndot-55.otf
+vendor/etc/camera/Robotofont/Roboto-55.ttf
+vendor/etc/camera/SansCJKFont/NotoSansCJK.ttc
