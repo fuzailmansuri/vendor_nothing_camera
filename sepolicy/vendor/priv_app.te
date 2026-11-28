@@ -1,0 +1,4 @@
+# Hexagon QNN / DSP access and Nothing feature props for com.nothing.camera
+allow { priv_app priv_app_36 } adsprpcd_file:dir { search getattr };
+get_prop(priv_app, vendor_nothing_feature_prop)
+get_prop(priv_app_36, vendor_nothing_feature_prop)

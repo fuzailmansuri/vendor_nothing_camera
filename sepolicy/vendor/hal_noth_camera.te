@@ -1,0 +1,8 @@
+# Shared Nothing camera algorithm Binder interface. Each device assigns its
+# server and client domains with hal_server_domain()/hal_client_domain().
+hal_attribute_service(vendor_hal_noth_camera, vendor_hal_noth_camera_service)
+
+# Binder calls/callbacks and transferred file descriptors. On this ROM,
+# hal_client_domain() also supplies the client/HAL memfd permissions.
+binder_call(vendor_hal_noth_camera_client, vendor_hal_noth_camera_server)
+binder_call(vendor_hal_noth_camera_server, vendor_hal_noth_camera_client)

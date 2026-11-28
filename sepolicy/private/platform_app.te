@@ -1,0 +1,2 @@
+get_prop(platform_app, aac_drc_prop)
+get_prop(platform_app_36, aac_drc_prop)

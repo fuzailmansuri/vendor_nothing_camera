@@ -1,0 +1,4 @@
+allow { platform_app platform_app_36 } adsprpcd_file:dir { search getattr };
+get_prop(platform_app, vendor_nothing_feature_prop)
+get_prop(platform_app_36, vendor_nothing_feature_prop)
+dontaudit { platform_app platform_app_36 } vendor_default_prop:file { getattr open map read };
